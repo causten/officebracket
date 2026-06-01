@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Predictions - FIFA World Cup 2026</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="index.html" class="nav-link">Make Predictions</a>
+        <a href="predictions.html" class="nav-link active">View All Predictions</a>
+    </nav>
+
+    <header>
+        <h1>FIFA World Cup 2026</h1>
+        <p>Group Stage Predictions</p>
+    </header>
+
+    <div class="users-section" id="users-section">
+        <h2>Select a participant</h2>
+        <div class="user-list" id="user-list">
+            <div class="loading">Loading predictions...</div>
+        </div>
+    </div>
+
+    <div id="viewer-area"></div>
+
+    <footer>
+        Predictions are stored in the <a href="https://github.com/causten/officebracket" style="color:#888">officebracket</a> repository.
+    </footer>
+
+    <script src="data.js"></script>
+    <script>
+        let allUsers = [];
+
+        async function loadUserList() {
+            const listEl = document.getElementById('user-list');
+            try {
+                const res = await fetch(`${API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}/contents/predictions`);
+                if (res.status === 404) {
+                    listEl.innerHTML = '<div class="empty-state"><p>No predictions submitted yet.</p><a href="index.html" class="btn btn-connect" style="text-decoration:none">Make your predictions</a></div>';
+                    return;
+                }
+                if (!res.ok) throw new Error("Failed to load: " + res.statusText);
+
+                const files = await res.json();
+                allUsers = files
+                    .filter(f => f.name.endsWith('.json'))
+                    .map(f => ({
+                        name: f.name.replace('.json', ''),
+                        path: f.path,
+                        download_url: f.download_url
+                    }));
+
+                if (allUsers.length === 0) {
+                    listEl.innerHTML = '<div class="empty-state"><p>No predictions submitted yet.</p><a href="index.html" class="btn btn-connect" style="text-decoration:none">Make your predictions</a></div>';
+                    return;
+                }
+
+                renderUserList();
+
+                const params = new URLSearchParams(window.location.search);
+                const selected = params.get('user');
+                if (selected && allUsers.find(u => u.name === selected)) {
+                    loadUserPredictions(selected);
+                }
+            } catch (e) {
+                listEl.innerHTML = `<div class="error-msg">Error loading predictions: ${e.message}</div>`;
+            }
+        }
+
+        function renderUserList() {
+            const listEl = document.getElementById('user-list');
+            listEl.innerHTML = '';
+
+            allUsers.forEach(user => {
+                const card = document.createElement('div');
+                card.className = 'user-card';
+                card.dataset.username = user.name;
+                card.innerHTML = `<div class="user-name">${user.name}</div>`;
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.user-card').forEach(c => c.classList.remove('active'));
+                    card.classList.add('active');
+                    history.replaceState(null, '', `?user=${encodeURIComponent(user.name)}`);
+                    loadUserPredictions(user.name);
+                });
+                listEl.appendChild(card);
+            });
+        }
+
+        async function loadUserPredictions(username) {
+            const area = document.getElementById('viewer-area');
+            area.innerHTML = '<div class="loading">Loading predictions...</div>';
+
+            document.querySelectorAll('.user-card').forEach(c => {
+                c.classList.toggle('active', c.dataset.username === username);
+            });
+
+            try {
+                const user = allUsers.find(u => u.name === username);
+                if (!user) throw new Error("User not found");
+
+                const res = await fetch(user.download_url);
+                if (!res.ok) throw new Error("Failed to load predictions");
+
+                const data = await res.json();
+                renderPredictions(data);
+            } catch (e) {
+                area.innerHTML = `<div class="error-msg">Error: ${e.message}</div>`;
+            }
+        }
+
+        function renderPredictions(data) {
+            const area = document.getElementById('viewer-area');
+            area.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.className = 'viewer-header';
+            const ts = data.timestamp ? new Date(data.timestamp).toLocaleString() : '';
+            header.innerHTML = `
+                <h2>${data.user}'s Predictions</h2>
+                ${ts ? `<div class="timestamp">Submitted ${ts}</div>` : ''}
+            `;
+            area.appendChild(header);
+
+            const legend = document.createElement('div');
+            legend.className = 'legend';
+            legend.innerHTML = `
+                <span><span class="legend-dot advance"></span> Advances (Top 2)</span>
+                <span><span class="legend-dot eliminated"></span> Eliminated</span>
+            `;
+            area.appendChild(legend);
+
+            const container = document.createElement('div');
+            container.className = 'groups-container';
+
+            Object.keys(groups).forEach(groupKey => {
+                const teamOrder = data.predictions[groupKey];
+                if (!teamOrder) return;
+
+                const card = document.createElement('div');
+                card.className = 'group-card';
+
+                const gh = document.createElement('div');
+                gh.className = 'group-header';
+                gh.innerHTML = `<span>Group ${groupKey}</span><span class="qualify-label">Top 2 advance</span>`;
+                card.appendChild(gh);
+
+                const list = document.createElement('ul');
+                list.className = 'team-list';
+
+                teamOrder.forEach((teamName, index) => {
+                    const team = getTeamByName(teamName);
+                    if (!team) return;
+
+                    const li = document.createElement('li');
+                    li.className = `team-item readonly rank-${index + 1}`;
+                    li.innerHTML = `
+                        <span class="team-rank">${index + 1}</span>
+                        <img class="team-flag" src="${getFlagUrl(team.code)}" alt="${team.name} flag" loading="lazy">
+                        <span class="team-name">${team.name}</span>
+                    `;
+                    list.appendChild(li);
+                });
+
+                card.appendChild(list);
+                container.appendChild(card);
+            });
+
+            area.appendChild(container);
+        }
+
+        document.addEventListener('DOMContentLoaded', loadUserList);
+    </script>
+</body>
+</html>
